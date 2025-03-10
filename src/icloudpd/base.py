@@ -578,6 +578,13 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
     is_eager=True,
     callback=report_version,
 )
+@click.option(
+    "--skip-download-for-keep-icloud",
+    help="Use in conjunction with --keep-icloud-recent-days flag. This new flag will prevent downloading the X number of image/videos that we set to keep in Icloud to local",
+    is_flag=True,
+    default=False
+)
+
 def main(
     directory: Optional[str],
     username: str,
@@ -613,6 +620,7 @@ def main(
     threads_num: int,
     delete_after_download: bool,
     keep_icloud_recent_days: Optional[int],
+    skip_download_for_keep_icloud: bool,
     domain: str,
     watch_with_interval: Optional[int],
     dry_run: bool,
@@ -667,6 +675,10 @@ def main(
             print(
                 "--watch_with_interval is not compatible with --list_albums, --only_print_filenames"
             )
+            sys.exit(2)
+        
+        if skip_download_for_keep_icloud and keep_icloud_recent_days is None:
+            print("--skip_download_for_keep_icloud need to be used along with --keep_icloud_recent_days")
             sys.exit(2)
 
         # hacky way to use one param in another
@@ -731,6 +743,7 @@ def main(
             threads_num=threads_num,
             delete_after_download=delete_after_download,
             keep_icloud_recent_days=keep_icloud_recent_days,
+            skip_download_for_keep_icloud=skip_download_for_keep_icloud,
             domain=domain,
             watch_with_interval=watch_with_interval,
             dry_run=dry_run,
@@ -807,6 +820,7 @@ def main(
             notification_script,
             delete_after_download,
             keep_icloud_recent_days,
+            skip_download_for_keep_icloud,
             domain,
             logger,
             watch_with_interval,
@@ -1186,6 +1200,7 @@ def core(
     notification_script: Optional[str],
     delete_after_download: bool,
     keep_icloud_recent_days: Optional[int],
+    skip_download_for_keep_icloud: bool,
     domain: str,
     logger: logging.Logger,
     watch_interval: Optional[int],
@@ -1373,36 +1388,39 @@ def core(
                         )
                         break
                     item = next(photos_iterator)
+                    created_date = item.created.astimezone(get_localzone())
+                    age_days = (now - created_date).days
                     should_delete = False
+                    is_item_outside_keep_range = keep_icloud_recent_days is not None and age_days >= keep_icloud_recent_days
 
-                    if download_photo(consecutive_files_found, item) and delete_after_download:
-                        should_delete = True
-
-                    if keep_icloud_recent_days is not None:
-                        created_date = item.created.astimezone(get_localzone())
-                        age_days = (now - created_date).days
+                    if skip_download_for_keep_icloud and not is_item_outside_keep_range:
+                        logger.debug("Skip download/delete of %s as it is within the keep_icloud_recent_days period %d and skip_download_for_keep_icloud is true",
+                                    item.filename,
+                                    age_days)
+                    else:
+                        if download_photo(consecutive_files_found, item) and (delete_after_download or is_item_outside_keep_range):
+                            should_delete = True
+        
                         logger.debug(f"Created date: {created_date}")
                         logger.debug(f"Keep iCloud recent days: {keep_icloud_recent_days}")
                         logger.debug(f"Age days: {age_days}")
-                        if age_days < keep_icloud_recent_days:
+
+                        if should_delete:
+                            delete_local = partial(
+                                delete_photo_dry_run if dry_run else delete_photo,
+                                logger,
+                                icloud.photos,
+                                library_object,
+                                item,
+                            )
+
+                            retrier(delete_local, error_handler)
+                        else:
                             logger.debug(
                                 "Skipping deletion of %s as it is within the keep_icloud_recent_days period (%d days old)",
                                 item.filename,
                                 age_days,
                             )
-                        else:
-                            should_delete = True
-
-                    if should_delete:
-                        delete_local = partial(
-                            delete_photo_dry_run if dry_run else delete_photo,
-                            logger,
-                            icloud.photos,
-                            library_object,
-                            item,
-                        )
-
-                        retrier(delete_local, error_handler)
 
                     photos_counter += 1
                     status_exchange.get_progress().photos_counter = photos_counter

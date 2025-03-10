@@ -41,6 +41,7 @@ class Config:
         threads_num: int,
         delete_after_download: bool,
         keep_icloud_recent_days: Optional[int],
+        skip_download_for_keep_icloud: bool,
         domain: str,
         watch_with_interval: Optional[int],
         dry_run: bool,
@@ -83,6 +84,7 @@ class Config:
         self.threads_num = threads_num
         self.delete_after_download = delete_after_download
         self.keep_icloud_recent_days = keep_icloud_recent_days
+        self.skip_download_for_keep_icloud = skip_download_for_keep_icloud
         self.domain = domain
         self.watch_with_interval = watch_with_interval
         self.dry_run = dry_run
